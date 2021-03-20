@@ -818,6 +818,7 @@ public class WorkflowTestingTest {
       assertTrue(name1, name1.equals("ParentWorkflow") || name1.equals("ChildWorkflow"));
 
       try {
+        result = result.thenApply(s -> s);
         result.get();
       } catch (ExecutionException e) {
         throw e.getCause();
