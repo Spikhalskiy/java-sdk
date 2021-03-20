@@ -39,7 +39,6 @@ import java.lang.reflect.Type;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -308,12 +307,14 @@ public final class TestWorkflowEnvironmentInternal implements TestWorkflowEnviro
 
       @Override
       public <R> CompletableFuture<R> getResultAsync(Class<R> resultClass, Type resultType) {
-        return new TimeLockingFuture<>(next.getResultAsync(resultClass, resultType));
+        locker.unlockTimeSkipping("TimeLockingWorkflowStub getResultAsync");
+        return wrapIntoLockTimeSkipping(next.getResultAsync(resultClass, resultType));
       }
 
       @Override
       public <R> CompletableFuture<R> getResultAsync(Class<R> resultClass) {
-        return new TimeLockingFuture<>(next.getResultAsync(resultClass));
+        locker.unlockTimeSkipping("TimeLockingWorkflowStub getResultAsync");
+        return wrapIntoLockTimeSkipping(next.getResultAsync(resultClass));
       }
 
       @Override
@@ -341,13 +342,16 @@ public final class TestWorkflowEnvironmentInternal implements TestWorkflowEnviro
       @Override
       public <R> CompletableFuture<R> getResultAsync(
           long timeout, TimeUnit unit, Class<R> resultClass, Type resultType) {
-        return new TimeLockingFuture<>(next.getResultAsync(timeout, unit, resultClass, resultType));
+        locker.unlockTimeSkipping("TimeLockingWorkflowStub getResultAsync");
+        return wrapIntoLockTimeSkipping(
+            next.getResultAsync(timeout, unit, resultClass, resultType));
       }
 
       @Override
       public <R> CompletableFuture<R> getResultAsync(
           long timeout, TimeUnit unit, Class<R> resultClass) {
-        return new TimeLockingFuture<>(next.getResultAsync(timeout, unit, resultClass));
+        locker.unlockTimeSkipping("TimeLockingWorkflowStub getResultAsync");
+        return wrapIntoLockTimeSkipping(next.getResultAsync(timeout, unit, resultClass));
       }
 
       @Override
@@ -375,50 +379,10 @@ public final class TestWorkflowEnvironmentInternal implements TestWorkflowEnviro
         return next.getOptions();
       }
 
-      /** Unlocks time skipping before blocking calls and locks back after completion. */
-      private class TimeLockingFuture<R> extends CompletableFuture<R> {
-
-        public TimeLockingFuture(CompletableFuture<R> resultAsync) {
-          @SuppressWarnings({"FutureReturnValueIgnored", "unused"})
-          CompletableFuture<R> ignored =
-              resultAsync.whenComplete(
-                  (r, e) -> {
-                    locker.lockTimeSkipping(
-                        "TimeLockingWorkflowStub TimeLockingFuture constructor");
-                    if (e == null) {
-                      this.complete(r);
-                    } else {
-                      this.completeExceptionally(e);
-                    }
-                  });
-        }
-
-        @Override
-        public R get() throws InterruptedException, ExecutionException {
-          locker.unlockTimeSkipping("TimeLockingWorkflowStub TimeLockingFuture get");
-          try {
-            return super.get();
-          } finally {
-            locker.lockTimeSkipping("TimeLockingWorkflowStub TimeLockingFuture get");
-          }
-        }
-
-        @Override
-        public R get(long timeout, TimeUnit unit)
-            throws InterruptedException, ExecutionException, TimeoutException {
-          locker.unlockTimeSkipping("TimeLockingWorkflowStub TimeLockingFuture get");
-          try {
-            return super.get(timeout, unit);
-          } finally {
-            locker.lockTimeSkipping("TimeLockingWorkflowStub TimeLockingFuture get");
-          }
-        }
-
-        @Override
-        public R join() {
-          locker.unlockTimeSkipping("TimeLockingWorkflowStub TimeLockingFuture join");
-          return super.join();
-        }
+      private <R> CompletableFuture<R> wrapIntoLockTimeSkipping(CompletableFuture<R> future) {
+        return future.whenComplete(
+            (r, e) ->
+                locker.lockTimeSkipping("TimeLockingWorkflowStub wrapIntoLockTimeSkipping"));
       }
     }
   }
