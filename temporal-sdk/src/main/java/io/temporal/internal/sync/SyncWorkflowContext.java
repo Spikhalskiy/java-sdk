@@ -23,6 +23,7 @@ import static io.temporal.internal.common.HeaderUtils.convertMapFromObjectToByte
 import static io.temporal.internal.common.HeaderUtils.toHeaderGrpc;
 import static io.temporal.internal.common.SerializerUtils.toRetryPolicy;
 
+import com.google.protobuf.Timestamp;
 import com.uber.m3.tally.Scope;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.activity.LocalActivityOptions;
@@ -32,7 +33,6 @@ import io.temporal.api.command.v1.SignalExternalWorkflowExecutionCommandAttribut
 import io.temporal.api.command.v1.StartChildWorkflowExecutionCommandAttributes;
 import io.temporal.api.common.v1.ActivityType;
 import io.temporal.api.common.v1.Memo;
-import io.temporal.api.common.v1.Payload;
 import io.temporal.api.common.v1.Payloads;
 import io.temporal.api.common.v1.SearchAttributes;
 import io.temporal.api.common.v1.WorkflowExecution;
@@ -52,6 +52,7 @@ import io.temporal.failure.CanceledFailure;
 import io.temporal.failure.ChildWorkflowFailure;
 import io.temporal.failure.FailureConverter;
 import io.temporal.failure.TemporalFailure;
+import io.temporal.internal.common.HeaderUtils;
 import io.temporal.internal.common.InternalUtils;
 import io.temporal.internal.common.OptionsUtils;
 import io.temporal.internal.common.ProtobufTimeUtils;
@@ -70,7 +71,6 @@ import io.temporal.workflow.Promise;
 import io.temporal.workflow.Workflow;
 import java.lang.reflect.Type;
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -280,11 +280,8 @@ final class SyncWorkflowContext implements WorkflowOutboundCallsInterceptor {
     if (propagators == null) {
       propagators = this.contextPropagators;
     }
-    io.temporal.api.common.v1.Header grpcHeader =
-        toHeaderGrpc(header, extractContextsAndConvertToBytes(propagators));
-    if (grpcHeader != null) {
-      attributes.setHeader(grpcHeader);
-    }
+    attributes.setHeader(
+        toHeaderGrpc(header, HeaderUtils.extractContextsAndConvertToBytes(propagators)));
     return new ExecuteActivityParameters(attributes, options.getCancellationType());
   }
 
@@ -294,32 +291,30 @@ final class SyncWorkflowContext implements WorkflowOutboundCallsInterceptor {
       Header header,
       Optional<Payloads> input,
       int attempt) {
-    options = LocalActivityOptions.newBuilder(options).validateAndBuildWithDefaults();
-
+    Timestamp protoTime = ProtobufTimeUtils.getCurrentProtoTime();
     PollActivityTaskQueueResponse.Builder activityTask =
         PollActivityTaskQueueResponse.newBuilder()
             .setActivityId(this.context.randomUUID().toString())
             .setWorkflowNamespace(this.context.getNamespace())
             .setWorkflowExecution(this.context.getWorkflowExecution())
-            .setScheduledTime(ProtobufTimeUtils.getCurrentProtoTime())
+            .setScheduledTime(protoTime)
             .setStartToCloseTimeout(
                 ProtobufTimeUtils.toProtoDuration(options.getStartToCloseTimeout()))
             .setScheduleToCloseTimeout(
                 ProtobufTimeUtils.toProtoDuration(options.getScheduleToCloseTimeout()))
-            .setStartedTime(ProtobufTimeUtils.getCurrentProtoTime())
+            .setStartedTime(protoTime)
             .setActivityType(ActivityType.newBuilder().setName(name))
             .setAttempt(attempt);
-    io.temporal.api.common.v1.Header grpcHeader =
-        toHeaderGrpc(header, extractContextsAndConvertToBytes(contextPropagators));
-    if (grpcHeader != null) {
-      activityTask.setHeader(grpcHeader);
-    }
+
+    activityTask.setHeader(
+        toHeaderGrpc(header, HeaderUtils.extractContextsAndConvertToBytes(contextPropagators)));
     if (input.isPresent()) {
       activityTask.setInput(input.get());
     }
     RetryOptions retryOptions = options.getRetryOptions();
-    activityTask.setRetryPolicy(
-        toRetryPolicy(RetryOptions.newBuilder(retryOptions).validateBuildWithDefaults()));
+    if (retryOptions != null) {
+      activityTask.setRetryPolicy(toRetryPolicy(retryOptions));
+    }
     Duration localRetryThreshold = options.getLocalRetryThreshold();
     if (localRetryThreshold == null) {
       localRetryThreshold = context.getWorkflowTaskTimeout().multipliedBy(6);
@@ -379,7 +374,6 @@ final class SyncWorkflowContext implements WorkflowOutboundCallsInterceptor {
     attributes.setWorkflowTaskTimeout(
         ProtobufTimeUtils.toProtoDuration(options.getWorkflowTaskTimeout()));
     String taskQueue = options.getTaskQueue();
-    TaskQueue.Builder tl = TaskQueue.newBuilder();
     if (taskQueue != null) {
       attributes.setTaskQueue(TaskQueue.newBuilder().setName(taskQueue));
     }
@@ -391,9 +385,8 @@ final class SyncWorkflowContext implements WorkflowOutboundCallsInterceptor {
       attributes.setRetryPolicy(toRetryPolicy(retryOptions));
     }
     attributes.setCronSchedule(OptionsUtils.safeGet(options.getCronSchedule()));
-    io.temporal.api.common.v1.Header grpcHeader =
-        toHeaderGrpc(header, extractContextsAndConvertToBytes(propagators));
-    attributes.setHeader(grpcHeader);
+    attributes.setHeader(
+        toHeaderGrpc(header, HeaderUtils.extractContextsAndConvertToBytes(propagators)));
     ParentClosePolicy parentClosePolicy = options.getParentClosePolicy();
     if (parentClosePolicy != null) {
       attributes.setParentClosePolicy(parentClosePolicy);
@@ -431,17 +424,6 @@ final class SyncWorkflowContext implements WorkflowOutboundCallsInterceptor {
               return null;
             });
     return result;
-  }
-
-  private Header extractContextsAndConvertToBytes(List<ContextPropagator> contextPropagators) {
-    if (contextPropagators == null) {
-      return null;
-    }
-    Map<String, Payload> result = new HashMap<>();
-    for (ContextPropagator propagator : contextPropagators) {
-      result.putAll(propagator.serializeContext(propagator.getCurrentContext()));
-    }
-    return new Header(result);
   }
 
   private RuntimeException mapChildWorkflowException(Exception failure) {

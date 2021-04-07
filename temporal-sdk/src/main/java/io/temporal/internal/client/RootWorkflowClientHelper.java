@@ -30,8 +30,8 @@ import io.temporal.api.workflowservice.v1.StartWorkflowExecutionRequest;
 import io.temporal.client.WorkflowClientOptions;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.common.RetryOptions;
-import io.temporal.common.context.ContextPropagator;
 import io.temporal.common.interceptors.WorkflowClientCallsInterceptor;
+import io.temporal.internal.common.HeaderUtils;
 import io.temporal.internal.common.ProtobufTimeUtils;
 import java.util.*;
 
@@ -91,28 +91,15 @@ final class RootWorkflowClientHelper {
           SearchAttributes.newBuilder()
               .putAllIndexedFields(convertFromObjectToBytes(options.getSearchAttributes())));
     }
-
-    Header grpcHeader =
+    request.setHeader(
         toHeaderGrpc(
-            input.getHeader(), extractContextsAndConvertToBytes(options.getContextPropagators()));
-    request.setHeader(grpcHeader);
+            input.getHeader(),
+            HeaderUtils.extractContextsAndConvertToBytes(options.getContextPropagators())));
 
     return request.build();
   }
 
   private Map<String, Payload> convertFromObjectToBytes(Map<String, Object> map) {
     return convertMapFromObjectToBytes(map, clientOptions.getDataConverter());
-  }
-
-  private io.temporal.common.interceptors.Header extractContextsAndConvertToBytes(
-      List<ContextPropagator> contextPropagators) {
-    if (contextPropagators == null) {
-      return null;
-    }
-    Map<String, Payload> result = new HashMap<>();
-    for (ContextPropagator propagator : contextPropagators) {
-      result.putAll(propagator.serializeContext(propagator.getCurrentContext()));
-    }
-    return new io.temporal.common.interceptors.Header(result);
   }
 }

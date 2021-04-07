@@ -21,23 +21,27 @@ package io.temporal.internal.common;
 
 import io.temporal.api.common.v1.Header;
 import io.temporal.api.common.v1.Payload;
+import io.temporal.common.context.ContextPropagator;
 import io.temporal.common.converter.DataConverter;
 import io.temporal.common.converter.DataConverterException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 
 public class HeaderUtils {
 
   public static Header toHeaderGrpc(
-      io.temporal.common.interceptors.Header header,
-      io.temporal.common.interceptors.Header overrides) {
-    Header.Builder builder = Header.newBuilder().putAllFields(header.getValues());
-    if (overrides != null) {
-      for (Map.Entry<String, Payload> item : overrides.getValues().entrySet()) {
-        builder.putFields(item.getKey(), item.getValue());
-      }
+      @Nullable io.temporal.common.interceptors.Header header,
+      @Nullable io.temporal.common.interceptors.Header overrides) {
+    Header.Builder headerBuilder = Header.newBuilder();
+    if (header != null) {
+      headerBuilder.putAllFields(header.getValues());
     }
-    return builder.build();
+    if (overrides != null) {
+      headerBuilder.putAllFields(overrides.getValues());
+    }
+    return headerBuilder.build();
   }
 
   public static Map<String, Payload> convertMapFromObjectToBytes(
@@ -54,6 +58,18 @@ public class HeaderUtils {
       }
     }
     return result;
+  }
+
+  public static io.temporal.common.interceptors.Header extractContextsAndConvertToBytes(
+      List<ContextPropagator> contextPropagators) {
+    if (contextPropagators == null || contextPropagators.isEmpty()) {
+      return null;
+    }
+    Map<String, Payload> result = new HashMap<>();
+    for (ContextPropagator propagator : contextPropagators) {
+      result.putAll(propagator.serializeContext(propagator.getCurrentContext()));
+    }
+    return new io.temporal.common.interceptors.Header(result);
   }
 
   private HeaderUtils() {}
