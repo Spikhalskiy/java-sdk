@@ -47,6 +47,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public final class TestWorkflowEnvironmentInternal implements TestWorkflowEnvironment {
+  private static final Logger log = LoggerFactory.getLogger(TestWorkflowEnvironmentInternal.class);
 
   private final TestEnvironmentOptions testEnvironmentOptions;
   private final WorkflowClientOptions workflowClientOptions;
@@ -150,13 +151,13 @@ public final class TestWorkflowEnvironmentInternal implements TestWorkflowEnviro
   public void close() {
     workerFactory.shutdownNow();
     workerFactory.awaitTermination(10, TimeUnit.SECONDS);
-    service.close();
     if (Boolean.parseBoolean(System.getenv("USE_DOCKER_SERVICE"))) {
       workflowServiceStubs.shutdown();
     } else {
       workflowServiceStubs.shutdownNow();
     }
     workflowServiceStubs.awaitTermination(10, TimeUnit.SECONDS);
+    service.close();
   }
 
   @Override

@@ -34,17 +34,17 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-final class WorkflowPollTask implements Poller.PollTask<PollWorkflowTaskQueueResponse> {
+public final class WorkflowPollTask implements Poller.PollTask<PollWorkflowTaskQueueResponse> {
 
   private final Scope metricsScope;
   private final WorkflowServiceStubs service;
   private final String namespace;
   private final String taskQueue;
   private final String identity;
-  private static final Logger log = LoggerFactory.getLogger(WorkflowWorker.class);
+  private static final Logger log = LoggerFactory.getLogger(WorkflowPollTask.class);
   private final String binaryChecksum;
 
-  WorkflowPollTask(
+  public WorkflowPollTask(
       WorkflowServiceStubs service,
       String namespace,
       String taskQueue,
@@ -74,6 +74,7 @@ final class WorkflowPollTask implements Poller.PollTask<PollWorkflowTaskQueueRes
     }
     PollWorkflowTaskQueueResponse result;
     try {
+      log.error("Poll workflow task");
       result =
           service
               .blockingStub()

@@ -291,13 +291,18 @@ public final class WorkflowServiceStubsImpl implements WorkflowServiceStubs {
   @Override
   public void shutdownNow() {
     log.info("shutdownNow");
+
     shutdownRequested.set(true);
     if (channelNeedsShutdown) {
+      log.error("channel shutdown wait started");
       channel.shutdownNow();
+      log.error("channel shutdown wait finished");
     }
+
     if (inProcessServer != null) {
       inProcessServer.shutdownNow();
     }
+
     if (grpcConnectionManager != null) {
       grpcConnectionManager.shutdownNow();
     }
@@ -320,6 +325,7 @@ public final class WorkflowServiceStubsImpl implements WorkflowServiceStubs {
       }
       return true;
     } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
       return false;
     }
   }

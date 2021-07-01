@@ -29,10 +29,7 @@ import io.temporal.client.WorkflowClient;
 import io.temporal.common.converter.DataConverter;
 import io.temporal.internal.common.InternalUtils;
 import io.temporal.internal.replay.WorkflowExecutorCache;
-import io.temporal.internal.worker.PollWorkflowTaskDispatcher;
-import io.temporal.internal.worker.Poller;
-import io.temporal.internal.worker.PollerOptions;
-import io.temporal.internal.worker.WorkflowPollTaskFactory;
+import io.temporal.internal.worker.*;
 import io.temporal.serviceclient.MetricsTag;
 import java.util.HashMap;
 import java.util.Map;
@@ -123,14 +120,13 @@ public final class WorkerFactory {
     stickyPoller =
         new Poller<>(
             id.toString(),
-            new WorkflowPollTaskFactory(
-                    workflowClient.getWorkflowServiceStubs(),
-                    workflowClient.getOptions().getNamespace(),
-                    getStickyTaskQueueName(),
-                    stickyScope,
-                    id.toString(),
-                    workflowClient.getOptions().getBinaryChecksum())
-                .get(),
+            new WorkflowPollTask(
+                workflowClient.getWorkflowServiceStubs(),
+                workflowClient.getOptions().getNamespace(),
+                getStickyTaskQueueName(),
+                stickyScope,
+                id.toString(),
+                workflowClient.getOptions().getBinaryChecksum()),
             dispatcher,
             PollerOptions.newBuilder()
                 .setPollThreadNamePrefix(POLL_THREAD_NAME)
@@ -216,9 +212,7 @@ public final class WorkerFactory {
       }
     }
 
-    if (stickyPoller != null) {
-      stickyPoller.start();
-    }
+    stickyPoller.start();
   }
 
   /** Was {@link #start()} called. */
@@ -239,10 +233,8 @@ public final class WorkerFactory {
     if (state != State.Shutdown) {
       return false;
     }
-    if (stickyPoller != null) {
-      if (!stickyPoller.isTerminated()) {
-        return false;
-      }
+    if (!stickyPoller.isTerminated()) {
+      return false;
     }
     for (Worker worker : workers.values()) {
       if (!worker.isTerminated()) {
@@ -268,14 +260,17 @@ public final class WorkerFactory {
   public synchronized void shutdown() {
     log.info("shutdown");
     state = State.Shutdown;
-    if (stickyPoller != null) {
-      stickyPoller.shutdown();
-      // To ensure that it doesn't get new tasks before workers are shutdown.
-      stickyPoller.awaitTermination(1, TimeUnit.SECONDS);
-    }
+
+    stickyPoller.shutdown();
+    // To ensure that it doesn't get new tasks before workers are shutdown.
+    stickyPoller.awaitTermination(1, TimeUnit.SECONDS);
+
+    dispatcher.shutdown();
     for (Worker worker : workers.values()) {
       worker.shutdown();
     }
+
+    workflowThreadPool.shutdown();
   }
 
   /**
@@ -291,14 +286,18 @@ public final class WorkerFactory {
   public synchronized void shutdownNow() {
     log.info("shutdownNow");
     state = State.Shutdown;
-    if (stickyPoller != null) {
-      stickyPoller.shutdownNow();
-      // To ensure that it doesn't get new tasks before workers are shutdown.
-      stickyPoller.awaitTermination(1, TimeUnit.SECONDS);
-    }
+
+    stickyPoller.shutdownNow();
+    // To ensure that it doesn't get new tasks before workers are shutdown.
+    stickyPoller.awaitTermination(1, TimeUnit.SECONDS);
+    //    stickyPoller.shutdownNow();
+
+    dispatcher.shutdownNow();
     for (Worker worker : workers.values()) {
       worker.shutdownNow();
     }
+
+    workflowThreadPool.shutdownNow();
   }
 
   /**
@@ -309,12 +308,14 @@ public final class WorkerFactory {
     log.info("awaitTermination begin");
     long timeoutMillis = unit.toMillis(timeout);
     timeoutMillis = InternalUtils.awaitTermination(stickyPoller, timeoutMillis);
+    timeoutMillis = InternalUtils.awaitTermination(dispatcher, timeoutMillis);
     for (Worker worker : workers.values()) {
       long t = timeoutMillis; // closure needs immutable value
       timeoutMillis =
           InternalUtils.awaitTermination(
               timeoutMillis, () -> worker.awaitTermination(t, TimeUnit.MILLISECONDS));
     }
+    InternalUtils.awaitTermination(workflowThreadPool, timeoutMillis);
     log.info("awaitTermination done");
   }
 
@@ -334,9 +335,7 @@ public final class WorkerFactory {
 
     log.info("suspendPolling");
     state = State.Suspended;
-    if (stickyPoller != null) {
-      stickyPoller.suspendPolling();
-    }
+    stickyPoller.suspendPolling();
     for (Worker worker : workers.values()) {
       worker.suspendPolling();
     }
@@ -349,9 +348,7 @@ public final class WorkerFactory {
 
     log.info("resumePolling");
     state = State.Started;
-    if (stickyPoller != null) {
-      stickyPoller.resumePolling();
-    }
+    stickyPoller.resumePolling();
     for (Worker worker : workers.values()) {
       worker.resumePolling();
     }

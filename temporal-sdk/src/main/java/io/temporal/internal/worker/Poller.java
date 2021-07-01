@@ -105,13 +105,7 @@ public final class Poller<T> implements SuspendableWorker {
     // It is important to pass blocking queue of at least options.getPollThreadCount() capacity. As
     // task enqueues next task the buffering is needed to queue task until the previous one releases
     // a thread.
-    pollExecutor =
-        new ThreadPoolExecutor(
-            pollerOptions.getPollThreadCount(),
-            pollerOptions.getPollThreadCount(),
-            1,
-            TimeUnit.SECONDS,
-            new ArrayBlockingQueue<>(pollerOptions.getPollThreadCount()));
+    pollExecutor = new ThreadPoolExecutor(1, 1, 1, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1));
     pollExecutor.setThreadFactory(
         new ExecutorThreadFactory(
             pollerOptions.getPollThreadNamePrefix(), pollerOptions.getUncaughtExceptionHandler()));
@@ -121,7 +115,7 @@ public final class Poller<T> implements SuspendableWorker {
             pollerOptions.getPollBackoffInitialInterval(),
             pollerOptions.getPollBackoffMaximumInterval(),
             pollerOptions.getPollBackoffCoefficient());
-    for (int i = 0; i < pollerOptions.getPollThreadCount(); i++) {
+    for (int i = 0; i < 1; i++) {
       pollExecutor.execute(new PollLoopTask(new PollExecutionTask()));
       metricsScope.counter(MetricsType.POLLER_START_COUNTER).inc(1);
     }
@@ -214,41 +208,37 @@ public final class Poller<T> implements SuspendableWorker {
 
     @Override
     public void run() {
-      try {
-        pollBackoffThrottler.throttle();
-        if (pollRateThrottler != null) {
-          pollRateThrottler.throttle();
-        }
-
-        CountDownLatch suspender = Poller.this.suspendLatch.get();
-        if (suspender != null) {
-          if (log.isDebugEnabled()) {
-            log.debug("poll task suspending latchCount=" + suspender.getCount());
+      while (!shouldTerminate()) {
+        try {
+          pollBackoffThrottler.throttle();
+          if (pollRateThrottler != null) {
+            pollRateThrottler.throttle();
           }
-          suspender.await();
-        }
 
-        if (shouldTerminate()) {
-          return;
-        }
+          CountDownLatch suspender = Poller.this.suspendLatch.get();
+          if (suspender != null) {
+            if (log.isDebugEnabled()) {
+              log.debug("poll task suspending latchCount=" + suspender.getCount());
+            }
+            suspender.await();
+          }
 
-        task.run();
-        pollBackoffThrottler.success();
-      } catch (Throwable e) {
-        if (e instanceof InterruptedException) {
-          // we restore the flag here, so it can be checked and processed (with exit) in finally.
-          Thread.currentThread().interrupt();
-        }
-        pollBackoffThrottler.failure();
-        uncaughtExceptionHandler.uncaughtException(Thread.currentThread(), e);
-      } finally {
-        if (!shouldTerminate()) {
-          // Resubmit itself back to pollExecutor
-          pollExecutor.execute(this);
-        } else {
-          log.info("poll loop is terminated");
+          if (shouldTerminate()) {
+            return;
+          }
+
+          task.run();
+          pollBackoffThrottler.success();
+        } catch (Throwable e) {
+          pollBackoffThrottler.failure();
+          uncaughtExceptionHandler.uncaughtException(Thread.currentThread(), e);
+          if (e instanceof InterruptedException) {
+            // we restore the flag here, so it can be checked and processed (with exit) in finally.
+            Thread.currentThread().interrupt();
+          }
         }
       }
+      log.info("poll loop is terminated");
     }
 
     /**
