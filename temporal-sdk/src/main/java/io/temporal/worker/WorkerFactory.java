@@ -287,7 +287,10 @@ public final class WorkerFactory {
     log.info("shutdownNow");
     state = State.Shutdown;
 
+    log.error("shutdown sticky poller start");
     stickyPoller.shutdownNow();
+    log.error("shutdown sticky poller done");
+
     // To ensure that it doesn't get new tasks before workers are shutdown.
     stickyPoller.awaitTermination(1, TimeUnit.SECONDS);
     //    stickyPoller.shutdownNow();

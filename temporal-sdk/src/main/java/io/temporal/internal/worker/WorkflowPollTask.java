@@ -80,12 +80,17 @@ public final class WorkflowPollTask implements Poller.PollTask<PollWorkflowTaskQ
               .blockingStub()
               .withOption(METRICS_TAGS_CALL_OPTIONS_KEY, metricsScope)
               .pollWorkflowTaskQueue(pollRequest);
+      log.error("Exited poll workflow task");
     } catch (StatusRuntimeException e) {
+      log.error("Exception poll workflow task");
       if (e.getStatus().getCode() == Status.Code.UNAVAILABLE
           && e.getMessage().startsWith("UNAVAILABLE: Channel shutdown")) {
         return null;
       }
       throw e;
+    } catch (Exception e) {
+      log.error("Exception poll workflow task");
+      throw new RuntimeException(e);
     }
     if (log.isTraceEnabled()) {
       log.trace(
